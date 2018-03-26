@@ -1,4 +1,4 @@
-package com.lightbend.akka.labrats
+package com.lightbend.akka.labs
 
 import io.akka.grpc.{ Echo, EchoMessage }
 

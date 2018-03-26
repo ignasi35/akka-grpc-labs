@@ -1,4 +1,4 @@
-package com.lightbend.akka.labrats
+package com.lightbend.akka.labs
 
 import java.io._
 import java.nio.file.{ Files, Paths }
