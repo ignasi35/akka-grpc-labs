@@ -2,45 +2,58 @@ package com.lightbend.akka.labrats
 
 import java.io._
 
-import akka.actor.{ ActorSystem, CoordinatedShutdown }
+import akka.actor.ActorSystem
+import akka.discovery.SimpleServiceDiscovery
+import akka.discovery.SimpleServiceDiscovery.{ Resolved, ResolvedTarget }
 import akka.stream.ActorMaterializer
-import io.akka.grpc.{ EchoClient, EchoMessage }
-import io.grpc.{ Channel, ManagedChannel }
+import io.akka.grpc.{ Echo, EchoClient, EchoMessage }
 import io.grpc.netty.shaded.io.grpc.netty.{ GrpcSslContexts, NegotiationType, NettyChannelBuilder }
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
-import scala.util.Failure
+import scala.concurrent.Future
+import scala.concurrent.duration._
 
 object Main extends App {
-
 
   implicit val system = ActorSystem()
   implicit val ctx = system.dispatcher
   implicit val mat = ActorMaterializer()
 
-  println("Building channel...")
-  var channel: ManagedChannel = ChannelBuilderUtils.build()
+  //  private val discovery: SimpleServiceDiscovery = ServiceDiscovery(system).discovery
+  private val discovery: SimpleServiceDiscovery = new HardcodedServiceDiscovery
 
-  println("Channel is built. Starting Client...")
-  val client = EchoClient(channel)
-
-  client
-    .echo(EchoMessage("the payloadContent"))
-    .map(println)
-    .onComplete {
-      case Failure(t) =>
-        t.printStackTrace()
-        System.exit(0)
-      case _ =>
-        System.exit(0)
+  discovery.lookup(Echo.name, 500.millis)
+    .map {
+      case resolved if resolved.addresses.nonEmpty =>
+        val address = resolved.addresses.head
+        val channel = ChannelBuilderUtils.build(address.host, address.port.getOrElse(8443))
+        EchoClient(channel)
+      case r => throw new RuntimeException(s"No address available for service ${r.serviceName}")
     }
+    .flatMap {
+      _.echo(EchoMessage("the payloadContent"))
+    }
+    .map(println)
+    .recover { case t => t.printStackTrace() }
+    .foreach { _ => System.exit(0) }
+
 }
+
+class HardcodedServiceDiscovery extends SimpleServiceDiscovery {
+  override def lookup(name: String, resolveTimeout: FiniteDuration): Future[SimpleServiceDiscovery.Resolved] =
+    Future.successful(
+      Resolved(name, ResolvedTarget("127.0.0.1", Some(8443)) :: Nil
+      )
+    )
+
+}
+
 
 private class PlaceHolder
 
 private object ChannelBuilderUtils {
 
-  def build() = {
+  def build(host: String, port: Int) = {
 
     val sslContext: SslContext =
       try
@@ -51,16 +64,17 @@ private object ChannelBuilderUtils {
 
     val builder =
       NettyChannelBuilder
-        .forAddress("127.0.0.1", 8443)
+        .forAddress(host, port)
         .flowControlWindow(65 * 1024)
         .negotiationType(NegotiationType.TLS)
         .sslContext(sslContext)
 
-          builder.overrideAuthority("foo.test.google.fr")
+    builder.overrideAuthority("foo.test.google.fr")
 
     builder.build
   }
 
+  // TODO: remove this duplication (see the server code)
   def loadCert(name: String): File = {
     val in = new BufferedInputStream(classOf[PlaceHolder].getResourceAsStream("/certs/" + name))
     val tmpFile: File = File.createTempFile(name, "")
