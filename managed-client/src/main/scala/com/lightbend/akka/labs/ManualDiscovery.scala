@@ -4,11 +4,16 @@ import akka.actor.ActorSystem
 import akka.discovery.SimpleServiceDiscovery
 import akka.stream.ActorMaterializer
 import com.lighbend.akka.labs.tools.ChannelBuilderUtils
+import com.lightbend.akka.labs.utils.HardcodedServiceDiscovery
 import io.akka.grpc.{ Echo, EchoClient, EchoMessage }
 
 import scala.concurrent.duration._
 
-object Main extends App {
+/**
+  * Manually invokes the service discovery, creates a channel and uses
+  * it to build a client and run the call.
+  */
+object ManualDiscovery extends App {
 
   implicit val system = ActorSystem()
   implicit val ctx = system.dispatcher

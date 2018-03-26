@@ -1,4 +1,4 @@
-package com.lightbend.akka.labs
+package com.lightbend.akka.labs.utils
 
 import akka.discovery.SimpleServiceDiscovery
 import akka.discovery.SimpleServiceDiscovery.{ Resolved, ResolvedTarget }
