@@ -6,33 +6,50 @@ organization := "com.lightbend.akka.grpc"
 lazy val `akka-grpc-labs-root` = project
   .in(file("."))
   .aggregate(
-    `akka-grpc-labs-server`,
-    `akka-grpc-labs-client`)
+    `tools`,
+    `akka-grpc-server`,
+    `akka-grpc-basic-client`,
+    `akka-grpc-managed-client`,
+  )
 
 
-
-lazy val `akka-grpc-labs-client` = project.in(file("client"))
-  .enablePlugins(JavaAgent, JavaAgent, AkkaGrpcPlugin)
+lazy val `tools` = project.in(file("tools"))
+  .enablePlugins(AkkaGrpcPlugin)
   .settings(
-    // setup
-    name := "akka-grpc-labs-client",
+    name := "tools",
+    //    PB.protoSources in Compile += target.value / "protobuf",
+    //    (akkaGrpcCodeGenerators in Compile) := Seq(
+    //      GeneratorAndSettings(ScalaClientCodeGenerator, (akkaGrpcCodeGeneratorSettings in Compile).value)),
+  )
 
-    // pre-compile
+lazy val `akka-grpc-basic-client` = project.in(file("basic-client"))
+  .enablePlugins(JavaAgent, AkkaGrpcPlugin)
+  .settings(
+    name := "akka-grpc-basic-client",
     PB.protoSources in Compile += target.value / "protobuf",
     (akkaGrpcCodeGenerators in Compile) := Seq(
       GeneratorAndSettings(ScalaClientCodeGenerator, (akkaGrpcCodeGeneratorSettings in Compile).value)),
-
-    // compile
-    libraryDependencies += "com.lightbend.akka.discovery" %% "akka-discovery-dns" % "0.10.0",
-
-    // runtime
     javaAgents += "org.mortbay.jetty.alpn" % "jetty-alpn-agent" % "2.0.6" % "runtime",
   )
+  .dependsOn(`tools`)
 
-lazy val `akka-grpc-labs-server` = project.in(file("server"))
-  .enablePlugins(JavaAgent, JavaAgent, AkkaGrpcPlugin)
+lazy val `akka-grpc-managed-client` = project.in(file("managed-client"))
+  .enablePlugins(JavaAgent, AkkaGrpcPlugin)
   .settings(
-    name := "akka-grpc-labs-server",
+    name := "akka-grpc-managed-client",
+    PB.protoSources in Compile += target.value / "protobuf",
+    (akkaGrpcCodeGenerators in Compile) := Seq(
+      GeneratorAndSettings(ScalaClientCodeGenerator, (akkaGrpcCodeGeneratorSettings in Compile).value)),
+    libraryDependencies += "com.lightbend.akka.discovery" %% "akka-discovery-dns" % "0.10.0",
+    javaAgents += "org.mortbay.jetty.alpn" % "jetty-alpn-agent" % "2.0.6" % "runtime",
+  )
+  .dependsOn(`tools`)
+
+lazy val `akka-grpc-server` = project.in(file("server"))
+  .enablePlugins(JavaAgent, AkkaGrpcPlugin)
+  .settings(
+    name := "akka-grpc-server",
     javaAgents += "org.mortbay.jetty.alpn" % "jetty-alpn-agent" % "2.0.6" % "runtime",
     PB.protoSources in Compile += target.value / "protobuf"
   )
+  .dependsOn(`tools`)
