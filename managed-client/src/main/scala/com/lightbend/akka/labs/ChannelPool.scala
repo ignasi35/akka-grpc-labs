@@ -1,22 +1,18 @@
 package com.lightbend.akka.labs
 
-import java.util.concurrent.atomic.AtomicReference
-import java.util.function.UnaryOperator
-
 import akka.actor.{ Actor, ActorRef, ActorSystem, Props }
 import akka.discovery.SimpleServiceDiscovery
-import akka.stream.ActorMaterializer
+import akka.pattern.ask
+import akka.stream.{ ActorMaterializer, Materializer }
+import akka.util.Timeout
 import com.lighbend.akka.labs.tools.ChannelBuilderUtils
+import com.lightbend.akka.labs.Pool.{ ChannelFactory, GetChannel }
 import com.lightbend.akka.labs.utils.HardcodedServiceDiscovery
 import io.akka.grpc.{ Echo, EchoClient, EchoMessage }
 import io.grpc.{ Channel, ManagedChannel }
-import akka.stream.Materializer
-import akka.pattern.{ ask, pipe }
-import akka.util.Timeout
-import com.lightbend.akka.labs.Pool.{ ChannelFactory, GetChannel, PooledChannel }
 
-import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
+import scala.concurrent.{ Await, ExecutionContext, Future }
 
 /**
   * Given a ServiceDiscovery, builds a channelFactory that uses a pool of
@@ -41,9 +37,7 @@ object ChannelPool extends App {
       }
   }
 
-  // This builds an implementation of the gRPC trait with a channelFactory that will create a new Channel
-  // for every call. This is very inefficient
-  val client: Echo = new EchoChannelPerCallClient(channelFactory)
+  val client: Echo = new EchoChannelPoolClient(channelFactory)
 
   private val seq: Seq[Future[Unit]] = (0 to 9999).map { id =>
     client
@@ -71,7 +65,7 @@ object Pool {
 
 class Pool(channelFactory: ChannelFactory) extends Actor {
 
-  var channel: ManagedChannel = ???
+  var channel: ManagedChannel = null
 
 
   override def preStart(): Unit = {
@@ -79,7 +73,7 @@ class Pool(channelFactory: ChannelFactory) extends Actor {
   }
 
   override def receive: Receive = {
-    case _: GetChannel.type => Pool.PooledChannel(channel)
+    case _: GetChannel.type => sender() ! Pool.PooledChannel(channel)
   }
 
 }
@@ -94,7 +88,6 @@ class EchoChannelPoolClient(channelFactory: ChannelFactory)(implicit sys: ActorS
 
   private val pool: ActorRef = sys.actorOf(Pool.props(channelFactory))
   implicit val timeout = Timeout(5 seconds) // needed for `?` below
-
 
   private def withChannel[T](block: (Channel) => Future[T]): Future[T] = {
     (pool ? GetChannel).mapTo[PooledChannel]

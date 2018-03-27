@@ -17,9 +17,6 @@ lazy val `tools` = project.in(file("tools"))
   .enablePlugins(AkkaGrpcPlugin)
   .settings(
     name := "tools",
-    //    PB.protoSources in Compile += target.value / "protobuf",
-    //    (akkaGrpcCodeGenerators in Compile) := Seq(
-    //      GeneratorAndSettings(ScalaClientCodeGenerator, (akkaGrpcCodeGeneratorSettings in Compile).value)),
   )
 
 lazy val `akka-grpc-basic-client` = project.in(file("basic-client"))
