@@ -1,6 +1,6 @@
 package com.lightbend.akka.labs
 
-import akka.actor.{ Actor, ActorRef, ActorSystem, Props }
+import akka.actor.{ Actor, ActorRef, ActorSystem, Props, Stash }
 import akka.discovery.SimpleServiceDiscovery
 import akka.pattern.ask
 import akka.stream.{ ActorMaterializer, Materializer }
@@ -27,13 +27,13 @@ object ChannelPool extends App {
   // using a hardcoded ServiceDiscovery to ease testing
   private val discovery: SimpleServiceDiscovery = new HardcodedServiceDiscovery
 
-  val channelFactory: () => Future[ManagedChannel] = () => {
-    discovery.lookup(Echo.name, 500.millis)
+  val channelFactory: Pool.ChannelFactory = (serviceName: String) => {
+    discovery.lookup(serviceName, 500.millis)
       .map {
         case resolved if resolved.addresses.nonEmpty =>
           val address = resolved.addresses.head
           ChannelBuilderUtils.build(address.host, address.port.getOrElse(8443))
-        case r => throw new RuntimeException(s"No address available for service ${r.serviceName}")
+        case r => throw new RuntimeException(s"No address available for service $serviceName")
       }
   }
 
@@ -51,11 +51,11 @@ object ChannelPool extends App {
 }
 
 object Pool {
-  type ChannelFactory = () => Future[ManagedChannel]
+  type ChannelFactory = (String) => Future[ManagedChannel]
 
-  def props(channelFactory: ChannelFactory) = Props(new Pool(channelFactory))
+  def props(channelFactory: ChannelFactory)(implicit ex: ExecutionContext) = Props(new Pool(channelFactory))
 
-  case object GetChannel
+  case class GetChannel(serviceName: String)
 
   case class PooledChannel(channel: Channel)
 
@@ -63,39 +63,62 @@ object Pool {
 
 }
 
-class Pool(channelFactory: ChannelFactory) extends Actor {
+class Pool(channelFactory: Pool.ChannelFactory)(implicit ex: ExecutionContext) extends Actor with Stash {
 
-  var channel: ManagedChannel = null
+  import Pool._
+  import scala.concurrent.duration._
+  import akka.pattern.pipe
 
-
-  override def preStart(): Unit = {
-    channel = Await.result(channelFactory(), 5.seconds)
-  }
+  var channelPool: Map[String, ManagedChannel] = Map.empty
+  var resolving: Set[String] = Set.empty
+  implicit val timeout = Timeout(5 seconds) // needed for `?` below
 
   override def receive: Receive = {
-    case _: GetChannel.type => sender() ! Pool.PooledChannel(channel)
+    // TODO: handle ReturnChannel messages
+    case GetChannel(serviceName) =>
+      channelPool.get(serviceName) match {
+        case Some(chann) => sender() ! Pool.PooledChannel(chann)
+        case None if !resolving.contains(serviceName) => {
+          resolving += serviceName
+          channelFactory(serviceName)
+            .mapTo[ManagedChannel]
+            .map { ch =>
+              channelPool += (serviceName -> ch)
+              unstashAll()
+              Pool.PooledChannel(ch)
+            }
+            .transform {
+              x =>
+                resolving -= serviceName
+                x
+            }
+            .pipeTo(sender)
+        }
+        case _ => {
+          stash()
+        }
+      }
   }
-
 }
 
 class EchoChannelPoolClient(channelFactory: ChannelFactory)(implicit sys: ActorSystem, mat: Materializer, ctx: ExecutionContext) extends Echo {
 
   import Pool._
 
-  override def echo(in: EchoMessage): Future[EchoMessage] = withChannel { ch =>
+  override def echo(in: EchoMessage): Future[EchoMessage] = withChannel(Echo.name) { ch =>
     EchoClient(ch).echo(in)
   }
 
   private val pool: ActorRef = sys.actorOf(Pool.props(channelFactory))
-  implicit val timeout = Timeout(5 seconds) // needed for `?` below
+  implicit val timeout: Timeout = Timeout(5.seconds) // needed for `?` below
 
-  private def withChannel[T](block: (Channel) => Future[T]): Future[T] = {
-    (pool ? GetChannel).mapTo[PooledChannel]
+  private def withChannel[T](serviceName: String)(block: (Channel) => Future[T]): Future[T] = {
+    (pool ? GetChannel(serviceName)).mapTo[PooledChannel]
       .flatMap { ch =>
         block(ch.channel)
           .transform {
             x => {
-              pool ! ReturnChannel
+              pool ! ReturnChannel(ch.channel)
               x
             }
           }
